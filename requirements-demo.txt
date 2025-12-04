@@ -1,9 +1,0 @@
-# ============================================================================
-# HealthAI Assistant - Minimal Dependencies (Demo Mode)
-# ============================================================================
-
-# Core Framework
-flask>=3.0.0
-
-# Configuration
-python-dotenv>=1.0.0

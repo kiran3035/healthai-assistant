@@ -1,0 +1,196 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'HealthAI Assistant - Infrastructure Setup (EC2, OpenSearch, IAM)'
+
+Parameters:
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+  
+  InstanceType:
+    Description: WebServer EC2 instance type
+    Type: String
+    Default: t3.medium
+    AllowedValues: [t3.medium, t3.large, m5.large]
+    ConstraintDescription: must be a valid EC2 instance type.
+
+  SSHLocation:
+    Description: The IP address range that can be used to SSH to the EC2 instances
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 0.0.0.0/0
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+
+Resources:
+  # ===========================================================================
+  # IAM Roles & Profiles
+  # ===========================================================================
+  HealthAIInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+      - PolicyName: HealthAIBedrockAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - bedrock:InvokeModel
+            - bedrock:InvokeModelWithResponseStream
+            - bedrock:ListFoundationModels
+            Resource: "*"
+      - PolicyName: HealthAIOpenSearchAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - aoss:*
+            Resource: "*"
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+      - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  HealthAIInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+      - !Ref HealthAIInstanceRole
+
+  # ===========================================================================
+  # Security Groups
+  # ===========================================================================
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH and HTTP access
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: !Ref SSHLocation
+      - IpProtocol: tcp
+        FromPort: 5000
+        ToPort: 5000
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+
+  # ===========================================================================
+  # EC2 Instance
+  # ===========================================================================
+  HealthAIWebServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0c7217cdde317cfec  # Ubuntu 22.04 LTS (us-east-1) - Update for other regions
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      IamInstanceProfile: !Ref HealthAIInstanceProfile
+      SecurityGroups:
+      - !Ref InstanceSecurityGroup
+      Tags:
+      - Key: Name
+        Value: HealthAI-Assistant-Server
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          apt-get update -y
+          apt-get install -y docker.io git python3-pip
+          usermod -aG docker ubuntu
+          systemctl enable docker
+          systemctl start docker
+          
+          # Install AWS CLI
+          snap install aws-cli --classic
+          
+          # Clone Repo (Public)
+          cd /home/ubuntu
+          git clone https://github.com/kiran3035/healthai-assistant.git
+          cd healthai-assistant
+          
+          # Setup Environment (Placeholder)
+          echo "AWS_REGION=${AWS::Region}" > .env
+          echo "BEDROCK_MODEL=claude-3-sonnet" >> .env
+          echo "OPENSEARCH_ENDPOINT=${HealthAICollection.CollectionEndpoint}" >> .env
+          
+          # Build and Run
+          docker build -t healthai .
+          docker run -d --name healthai -p 5000:5000 --restart always --env-file .env healthai
+
+  # ===========================================================================
+  # OpenSearch Serverless
+  # ===========================================================================
+  HealthAICollection:
+    Type: AWS::OpenSearchServerless::Collection
+    Properties:
+      Name: healthai-knowledge
+      Type: VECTORSEARCH
+      Description: Vector store for HealthAI Assistant
+
+  # Encryption Policy
+  HealthAIEncryptionPolicy:
+    Type: AWS::OpenSearchServerless::SecurityPolicy
+    Properties:
+      Name: healthai-encryption
+      Type: encryption
+      Policy: !Sub >-
+        {
+          "Rules": [
+            {
+              "ResourceType": "collection",
+              "Resource": ["collection/healthai-knowledge"]
+            }
+          ],
+          "AWSOwnedKey": true
+        }
+
+  # Network Policy (Public Access)
+  HealthAINetworkPolicy:
+    Type: AWS::OpenSearchServerless::SecurityPolicy
+    Properties:
+      Name: healthai-network
+      Type: network
+      Policy: !Sub >-
+        [
+          {
+            "Rules": [
+              {
+                "ResourceType": "collection",
+                "Resource": ["collection/healthai-knowledge"]
+              },
+              {
+                "ResourceType": "dashboard",
+                "Resource": ["collection/healthai-knowledge"]
+              }
+            ],
+            "AllowFromPublic": true
+          }
+        ]
+
+Outputs:
+  ServerPublicIP:
+    Description: Public IP address of the HealthAI Server
+    Value: !GetAtt HealthAIWebServer.PublicIp
+  
+  ServerURL:
+    Description: URL to access the application
+    Value: !Sub "http://${HealthAIWebServer.PublicIp}:5000"
+    
+  OpenSearchEndpoint:
+    Description: OpenSearch Serverless Endpoint
+    Value: !GetAtt HealthAICollection.CollectionEndpoint
