@@ -1,0 +1,33 @@
+# =============================================================================
+# HealthAI Assistant - Docker Compose Configuration
+# Development environment setup
+# =============================================================================
+
+version: '3.8'
+
+services:
+  healthai-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: healthai-assistant
+    ports:
+      - "5000:5000"
+    environment:
+      - KNOWLEDGE_DB_API_KEY=${KNOWLEDGE_DB_API_KEY}
+      - LLM_PROVIDER_KEY=${LLM_PROVIDER_KEY}
+      - KNOWLEDGE_INDEX_NAME=${KNOWLEDGE_INDEX_NAME:-healthai-knowledge-v1}
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=5000
+      - DEBUG_MODE=false
+    volumes:
+      - ./knowledge_base:/app/knowledge_base:ro
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+# Development override available via docker-compose.override.yml

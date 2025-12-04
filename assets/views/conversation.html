@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="HealthAI Assistant - Your intelligent health information companion">
+    
+    <title>HealthAI Assistant</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Styles -->
+    <link rel="stylesheet" href="{{ url_for('pages.static', filename='main.css') }}">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Header Section -->
+        <header class="app-header">
+            <div class="brand-container">
+                <div class="brand-icon">
+                    <i class="fas fa-heartbeat"></i>
+                </div>
+                <div class="brand-info">
+                    <h1 class="brand-title">HealthAI Assistant</h1>
+                    <span class="brand-tagline">Your Health Information Companion</span>
+                </div>
+            </div>
+            <div class="connection-status">
+                <span class="status-indicator"></span>
+                <span class="status-text">Online</span>
+            </div>
+        </header>
+
+        <!-- Chat Container -->
+        <main class="chat-container">
+            <!-- Messages Area -->
+            <div class="messages-area" id="conversationPanel">
+                <!-- Welcome Message -->
+                <div class="message assistant-message welcome-message">
+                    <div class="message-avatar">
+                        <i class="fas fa-robot"></i>
+                    </div>
+                    <div class="message-content">
+                        <p>Welcome! I'm your HealthAI Assistant, ready to help you find reliable health information.</p>
+                        <p class="disclaimer">Note: I provide educational information only. Always consult healthcare professionals for medical advice.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Input Area -->
+            <div class="input-area">
+                <form id="queryForm" class="query-form">
+                    <div class="input-wrapper">
+                        <input 
+                            type="text" 
+                            id="userInput" 
+                            name="message" 
+                            class="message-input" 
+                            placeholder="Ask me about health topics..." 
+                            autocomplete="off"
+                            required
+                        >
+                        <button type="submit" class="submit-button" id="submitBtn">
+                            <i class="fas fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <p>&copy; 2024 HealthAI Assistant. For educational purposes only.</p>
+        </footer>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const queryForm = document.getElementById('queryForm');
+            const userInput = document.getElementById('userInput');
+            const conversationPanel = document.getElementById('conversationPanel');
+            const submitBtn = document.getElementById('submitBtn');
+
+            // Format time for message timestamps
+            function formatCurrentTime() {
+                const now = new Date();
+                return now.toLocaleTimeString('en-US', { 
+                    hour: '2-digit', 
+                    minute: '2-digit',
+                    hour12: true 
+                });
+            }
+
+            // Create message element
+            function createMessageElement(content, isUser) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${isUser ? 'user-message' : 'assistant-message'}`;
+                
+                const timestamp = formatCurrentTime();
+                
+                messageDiv.innerHTML = `
+                    <div class="message-avatar">
+                        <i class="fas ${isUser ? 'fa-user' : 'fa-robot'}"></i>
+                    </div>
+                    <div class="message-content">
+                        <p>${escapeHtml(content)}</p>
+                        <span class="message-time">${timestamp}</span>
+                    </div>
+                `;
+                
+                return messageDiv;
+            }
+
+            // Create loading indicator
+            function createLoadingIndicator() {
+                const loadingDiv = document.createElement('div');
+                loadingDiv.className = 'message assistant-message loading-message';
+                loadingDiv.id = 'loadingIndicator';
+                
+                loadingDiv.innerHTML = `
+                    <div class="message-avatar">
+                        <i class="fas fa-robot"></i>
+                    </div>
+                    <div class="message-content">
+                        <div class="typing-indicator">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </div>
+                    </div>
+                `;
+                
+                return loadingDiv;
+            }
+
+            // Escape HTML to prevent XSS
+            function escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+
+            // Scroll to bottom of chat
+            function scrollToBottom() {
+                conversationPanel.scrollTop = conversationPanel.scrollHeight;
+            }
+
+            // Handle form submission
+            queryForm.addEventListener('submit', async function(event) {
+                event.preventDefault();
+                
+                const queryText = userInput.value.trim();
+                if (!queryText) return;
+
+                // Add user message
+                const userMessage = createMessageElement(queryText, true);
+                conversationPanel.appendChild(userMessage);
+                
+                // Clear input
+                userInput.value = '';
+                
+                // Show loading
+                const loadingIndicator = createLoadingIndicator();
+                conversationPanel.appendChild(loadingIndicator);
+                scrollToBottom();
+                
+                // Disable input during request
+                submitBtn.disabled = true;
+                userInput.disabled = true;
+
+                try {
+                    const formData = new FormData();
+                    formData.append('message', queryText);
+
+                    const response = await fetch('/api/chat', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const answerText = await response.text();
+                    
+                    // Remove loading indicator
+                    loadingIndicator.remove();
+                    
+                    // Add assistant response
+                    const assistantMessage = createMessageElement(answerText, false);
+                    conversationPanel.appendChild(assistantMessage);
+                    
+                } catch (error) {
+                    console.error('Request failed:', error);
+                    loadingIndicator.remove();
+                    
+                    const errorMessage = createMessageElement(
+                        'I apologize, but I encountered an issue. Please try again.',
+                        false
+                    );
+                    conversationPanel.appendChild(errorMessage);
+                } finally {
+                    submitBtn.disabled = false;
+                    userInput.disabled = false;
+                    userInput.focus();
+                    scrollToBottom();
+                }
+            });
+
+            // Auto-focus input
+            userInput.focus();
+        });
+    </script>
+</body>
+</html>
