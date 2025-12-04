@@ -137,6 +137,9 @@ Resources:
   # ===========================================================================
   HealthAICollection:
     Type: AWS::OpenSearchServerless::Collection
+    DependsOn:
+      - HealthAIEncryptionPolicy
+      - HealthAINetworkPolicy
     Properties:
       Name: healthai-knowledge
       Type: VECTORSEARCH
